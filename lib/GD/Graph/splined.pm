@@ -1,10 +1,11 @@
 package GD::Graph::splined;
 
-($GD::Graph::splined::VERSION) = '$Revision: 0.01 $' =~ /\s([\d.]+)/;
+$GD::Graph::splined::VERSION = 0.02;
 
 use strict;
 use warnings;
 
+use Carp;
 use GD::Graph::axestype;
 use GD::Graph::area;			# v1.16
 use GD::Polyline;
@@ -18,6 +19,9 @@ use GD::Polyline;
 sub draw_data_set {
     my $self = shift;       # object reference
     my $ds   = shift;       # number of the data set
+
+	$self->{bez_segs} ||= 20;	# number of bezier segs -- number of segments in each portion of the spline produces by toSpline()
+	$self->{csr} ||= 1/5;		# control seg ratio -- the one possibly user-tunable parameter in the addControlPoints() algorithm
 
     my @values = $self->{_data}->y_values($ds) or
         return $self->_set_error("Impossible illegal data set: $ds",
@@ -70,7 +74,10 @@ sub draw_data_set {
         }
     }
 
-	my $spline = $poly->addControlPoints->toSpline;
+	my $spline = $poly->addControlPoints(
+		$self->{bez_segs},
+		$self->{csr},
+	)->toSpline;
 	$self->{graph}->polydraw($spline,$dsci);
 
     # Draw the accent lines
@@ -92,7 +99,122 @@ sub draw_data_set {
     return $ds
 }
 
-'End of module';
+
+#
+# All this stuff
+#
+
+our $PI = 3.14159;
+our $TWO_PI = 2 * $PI;
+sub pi { $PI }
+
+sub GD::Polyline::addControlPoints {
+    my $self = shift;
+    my $bezSegs = shift || 20;
+    my $csr = shift || 1/5; # Orig default was 1/3
+
+    use GD::Polyline;
+
+    my @points = $self->vertices();
+
+	unless (@points > 1) {
+	    carp "Attempt to call addControlPoints() with too few vertices in polyline";
+		return undef;
+	}
+
+	my $points = scalar(@points);
+	my @segAngles  = $self->segAngle();
+	my @segLengths = $self->segLength();
+
+	my ($prevLen, $nextLen, $prevAngle, $thisAngle, $nextAngle);
+	my ($controlSeg, $pt, $ptX, $ptY, @controlSegs);
+
+	# this loop goes about creating polylines -- here called control segments --
+	# that hold the control points for the final set of control points
+
+	# each control segment has three points, and these are colinear
+
+	# the first and last will ultimately be "director points", and
+	# the middle point will ultimately be an "anchor point"
+
+	for my $i (0..$#points) {
+
+		$controlSeg = new GD::Polyline;
+
+		$pt = $points[$i];
+		($ptX, $ptY) = @$pt;
+
+		if ($self->isa('GD::Polyline') and ($i == 0 or $i == $#points)) {
+			$controlSeg->addPt($ptX, $ptY);	# director point
+			$controlSeg->addPt($ptX, $ptY);	# anchor point
+			$controlSeg->addPt($ptX, $ptY);	# director point
+			next;
+		}
+
+		$prevLen = $segLengths[$i-1];
+		$nextLen = $segLengths[$i];
+		$prevAngle = $segAngles[$i-1];
+		$nextAngle = $segAngles[$i];
+
+		# make a control segment with control points (director points)
+		# before and after the point from the polyline (anchor point)
+
+		$controlSeg->addPt($ptX - $csr * $prevLen, $ptY);	# director point
+		$controlSeg->addPt($ptX                  , $ptY);	# anchor point
+		$controlSeg->addPt($ptX + $csr * $nextLen, $ptY);	# director point
+
+		# note that:
+		# - the line is parallel to the x-axis, as the points have a common $ptY
+		# - the points are thus clearly colinear
+		# - the director point is a distance away from the anchor point in proportion to the length of the segment it faces
+
+		# now, we must come up with a reasonable angle for the control seg
+		#  first, "unwrap" $nextAngle w.r.t. $prevAngle
+		$nextAngle -= 2*pi() until $nextAngle < $prevAngle + pi();
+		$nextAngle += 2*pi() until $nextAngle > $prevAngle - pi();
+		#  next, use seg lengths as an inverse weighted average
+		#  to "tip" the control segment toward the *shorter* segment
+		$thisAngle = ($nextAngle * $prevLen + $prevAngle * $nextLen) / ($prevLen + $nextLen);
+
+		# rotate the control segment to $thisAngle about it's anchor point
+		$controlSeg->rotate($thisAngle, $ptX, $ptY);
+
+	} continue {
+		# save the control segment for later
+		push @controlSegs, $controlSeg;
+
+	}
+
+	# post process
+
+	my $controlPoly = new GD::Polyline; # ref($self);
+
+	# collect all the control segments' points in to a single control poly
+
+	foreach my $cs (@controlSegs) {
+		foreach my $pt ($cs->vertices()) {
+			$controlPoly->addPt(@$pt);
+		}
+	}
+
+	# final clean up based on poly type
+
+	if ($controlPoly->isa('GD::Polyline')) {
+		# remove the first and last control point
+		# since they are director points ...
+		$controlPoly->deletePt(0);
+		$controlPoly->deletePt($controlPoly->length()-1);
+	} else {
+		# move the first control point to the last control point
+		# since it is supposed to end with two director points ...
+		$controlPoly->addPt($controlPoly->getPt(0));
+		$controlPoly->deletePt(0);
+	}
+
+	return $controlPoly;
+}
+
+1;
 
 __END__
 
@@ -130,6 +252,10 @@ GD::Graph::splined - Smooth line graphs with GD::Graph
 
 A L<GD::Graph|GD::Graph> module that can be treated as an C<area> graph, but
 renders splined (smoothed) line graphs.
+
+If you find that the curves loop back over themselves, try setting the
+field C<csr> (Control Segment Ratio) to a smaller fraction than the default C<1/5>. To smooth a curve
+more, increase the value of the field.
 
 See L<GD::Graph|GD::Graph> for more details of how to produce graphs with GD.
 
