@@ -1,6 +1,7 @@
 package GD::Graph::splined;
 
-$GD::Graph::splined::VERSION = 0.02;
+use vars '$VERSOIN';
+$VERSION = "0.021";
 
 use strict;
 use warnings;
@@ -29,7 +30,6 @@ sub draw_data_set {
 
     # Select a data colour
     my $dsci = $self->set_clr($self->pick_data_clr($ds));
-    my $brci = $self->set_clr($self->pick_border_clr($ds));
 
     # Create a new polygon
     my $poly = GD::Polyline->new();
@@ -39,7 +39,9 @@ sub draw_data_set {
     # Add the data points
     for (my $i = 0; $i < @values; $i++) {
         my $value = $values[$i];
-        next unless defined $value;
+        # Graph zeros so that addControlPoints doesn't barf
+        $value = 0 unless defined $value;
+        # next unless defined $value;
 
         my $bottom = $self->_get_bottom($ds, $i);
         $value = $self->{_data}->get_y_cumulative($ds, $i)
@@ -47,6 +49,7 @@ sub draw_data_set {
 
         my ($x, $y) = $self->val_to_pixel($i + 1, $value, $ds);
         $poly->addPt($x, $y);
+
 		# Need to keep track of this stuff for hotspots, and because
 		# it's the only reliable way of closing the polygon, without
 		# making odd assumptions.
@@ -74,6 +77,9 @@ sub draw_data_set {
         }
     }
 
+	if ($poly->vertices<=1){
+		Carp::croak "Impossible dataset for a splined graph: too few vertices in polyline";
+	}
 	my $spline = $poly->addControlPoints(
 		$self->{bez_segs},
 		$self->{csr},
@@ -81,18 +87,15 @@ sub draw_data_set {
 	$self->{graph}->polydraw($spline,$dsci);
 
     # Draw the accent lines
+    my $brci = $self->set_clr($self->pick_border_clr($ds));
     if (defined $brci and
        ($self->{right} - $self->{left})/@values > $self->{accent_treshold}
 	) {
-        for (my $i = 1; $i < @values - 1; $i++) {
-            my $value = $values[$i];
-		    ## XXX Why don't I need this line?
-            ##next unless defined $value;
-
-            my ($x, $y) = $poly->getPt($i);
-            my $bottom = $bottom[$i]->[1];
-
-            $self->{graph}->dashedLine($x, $y, $x, $bottom, $brci);
+		for (my $i = 1; $i < @values - 1; $i++) {
+			my $value = $values[$i];
+			my ($x, $y) = $poly->getPt($i);
+			my $bottom = $bottom[$i]->[1];
+			$self->{graph}->dashedLine($x, $y, $x, $bottom, $brci);
         }
     }
 
@@ -112,8 +115,6 @@ sub GD::Polyline::addControlPoints {
     my $self = shift;
     my $bezSegs = shift || 20;
     my $csr = shift || 1/5; # Orig default was 1/3
-
-    use GD::Polyline;
 
     my @points = $self->vertices();
 

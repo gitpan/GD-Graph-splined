@@ -1,5 +1,13 @@
 Revision history for Perl extension GD::Graph::splined.
 
+0.021 Thu Aug  3 08:05:00 2006
+    - force the plotting of undefined points as zero points 
+    - catch illegal set error in a nicer way
+    
+0.02  Wed Aug  2 16:00:00 2006
+	- change default csr to prevent polylines looping back over themselves
+	- exposed csr and bez_segs; publicised csr only.
+
 0.01  Wed Aug  2 13:34:46 2006
 	- original version; created by h2xs 1.23 with options
 		-X -n GD::Graph::splined

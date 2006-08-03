@@ -2,7 +2,7 @@ use ExtUtils::MakeMaker;
 
 WriteMakefile(
     NAME              => 'GD::Graph::splined',
-    VERSION      		=> '0.02',
+    VERSION_FROM      => 'lib/GD/Graph/splined.pm',
     PREREQ_PM         => {
 		GD 				=> 2.18,	# For polyline
 		GD::Polyline	=> 0.2, 	# What the hell
